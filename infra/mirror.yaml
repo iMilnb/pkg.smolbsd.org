@@ -1,0 +1,211 @@
+# pkg.smolbsd.org — S3 website mirror + CloudFront + sync host sync role
+#
+# Deploy (from a machine with deploy rights, e.g. this laptop):
+#   1. Request an ACM certificate for pkg.smolbsd.org IN us-east-1
+#      (DNS validation: add the _acm-validation CNAME at the current
+#      smolbsd.org DNS provider). CloudFront only accepts us-east-1 certs.
+#   2. aws cloudformation deploy --region eu-west-1 --template-file infra/mirror.yaml \
+#        --stack-name pkg-smolbsd-org --capabilities CAPABILITY_NAMED_IAM \
+#        --parameter-overrides AcmCertificateArn=arn:aws:acm:us-east-1:<ACCOUNT_ID>:certificate:<CERT_ID>
+#   3. Attach the sync role to the sync host instance (one-off):
+#        aws ec2 associate-iam-instance-profile \
+#          --instance-id <SYNC_HOST_INSTANCE_ID> \
+#          --iam-instance-profile Name=Output "InstanceProfileName"
+#   4. At the smolbsd.org DNS provider add ONE record:
+#        CNAME pkg  ->  <DomainName output>
+#      (IPV6Enabled makes that hostname answer both A and AAAA; the legacy
+#      "dualstack." prefix is no longer needed/deprecated for new distros)
+#
+# Sync (crontab on sync host, small disk -> stream with --no-cache):
+#   17 5 * * * cd ~/src/pkg.smolbsd.org && python3 bin/sync.py sets     --bucket pkg.smolbsd.org --no-cache >> /var/log/pkg-smolbsd-sync.log 2>&1
+#   23 5 * * 0 cd ~/src/pkg.smolbsd.org && python3 bin/sync.py packages --bucket pkg.smolbsd.org --no-cache >> /var/log/pkg-smolbsd-sync.log 2>&1
+# If cdn.netbsd.org times out, point sync.py at another NetBSD mirror root:
+#   --source https://<mirror>  |  PKG_SMOLBSD_SOURCE env  |  repo `source` file
+# The root must carry BOTH pub/pkgsrc/packages/NetBSD and pub/NetBSD-daily
+# (https://www.netbsd.org/mirrors/). Verified 2026-11: ftp.netbsd.org serves
+# pkgsrc packages but NOT NetBSD-daily; nycdn.netbsd.org (sets default)
+# serves both trees. Interrupted runs resume: uploaded files are skipped.
+# After every manifest regeneration, audit it independently:
+#   python3 bin/verify_deps.py --manifest manifest/needed-x86_64.txt --arch x86_64
+#   python3 bin/verify_deps.py --manifest manifest/needed-aarch64.txt --arch aarch64
+# (exit 0 = every mirrored package's DEPENDS resolves inside the mirror)
+#
+# Release switch (e.g. 11.0 -> 11.1), when the time comes:
+#   1. echo 11.1 > release; regenerate + audit manifests (commands above)
+#   2. run both syncs: new release is mirrored, then the old release's
+#      whole subtree (packages AND netbsd-* sets) is auto-pruned.
+#      Refused unless the new release has actually landed; --no-cleanup
+#      keeps the old release. Preview with --dry-run --version 11.1.
+#   3. redeploy with MirrorVersion=11.1 (cache patterns track the release)
+#
+# Cache design (no invalidations needed): versioned .tgz names are immutable
+# and cached 24h (CachingOptimized); pkg_summary/index and the daily-updated
+# NetBSD-daily sets are never cached at the edge.
+
+Parameters:
+  BucketName:
+    Type: String
+    Default: pkg.smolbsd.org
+  DomainName:
+    Type: String
+    Default: pkg.smolbsd.org
+  MirrorVersion:
+    Type: String
+    Default: "11.0"
+    Description: >-
+      NetBSD release the mirror tracks (repo `release` file). Bump BOTH this
+      parameter and the release file when smolBSD moves to a new major.
+  AcmCertificateArn:
+    Type: String
+    Description: ACM certificate (us-east-1) for the CloudFront alias
+
+Resources:
+
+  Bucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Ref BucketName
+      WebsiteConfiguration:
+        IndexDocument: index.html        # generated per-directory by sync.py
+      # versioning keeps yesterday's sets/summaries after an overwrite or a
+      # bad manifest; old versions expire after 30 days
+      VersioningConfiguration:
+        Status: Enabled
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: false
+        BlockPublicPolicy: false
+        IgnorePublicAcls: false
+        RestrictPublicBuckets: false
+      OwnershipControls:
+        Rules: [{ ObjectOwnership: BucketOwnerEnforced }]
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-old-versions
+            Status: Enabled
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 30
+            ExpiredObjectDeleteMarker: true   # tidy markers left by prune
+
+  BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref Bucket
+      PolicyDocument:
+        Statement:
+          - Sid: PublicReadMirror
+            Effect: Allow
+            Principal: "*"
+            Action: s3:GetObject
+            Resource:
+              - !Sub "arn:aws:s3:::${BucketName}/pub/*"
+              - !Sub "arn:aws:s3:::${BucketName}/pub"   # slash-less top stub
+
+  # CloudFront: origin is the S3 *website* endpoint (required so generated
+  # index.html and x-amz-website-redirect-location stubs are honoured)
+  Distribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        HttpVersion: http2
+        IPV6Enabled: true
+        PriceClass: PriceClass_100       # US + Europe; switch to PriceClass_All if needed
+        Aliases: [!Ref DomainName]
+        DefaultRootObject: pub/index.html   # browsable root /
+        ViewerCertificate:
+          AcmCertificateArn: !Ref AcmCertificateArn
+          SslSupportMethod: sni-only
+        Origins:
+          - Id: s3website
+            DomainName: !Sub "${BucketName}.s3-website-${AWS::Region}.amazonaws.com"
+            CustomOriginConfig:
+              HTTPPort: 80
+              OriginProtocolPolicy: http-only   # website endpoint has no valid
+              # TLS cert for dotted bucket names (multi-label wildcard limit);
+              # viewers still get HTTPS via ACM, origin objects are public-read
+              # and uploads are always SigV4-signed
+        DefaultCacheBehavior:
+          TargetOriginId: s3website
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods: [GET, HEAD]
+          CachedMethods: [GET, HEAD]
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6   # CachingOptimized
+        CacheBehaviors:
+          # browsable root (DefaultRootObject page): always fresh
+          - PathPattern: "/"
+            TargetOriginId: s3website
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods: [GET, HEAD]
+            CachedMethods: [GET, HEAD]
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad  # CachingDisabled
+          # trimmed summaries: always fresh
+          - PathPattern: !Sub "/pub/pkgsrc/packages/NetBSD/*/${MirrorVersion}/All/pkg_summary.*"
+            TargetOriginId: s3website
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods: [GET, HEAD]
+            CachedMethods: [GET, HEAD]
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad  # CachingDisabled
+          # generated directory listings at any depth: always fresh
+          - PathPattern: "*/index.html"
+            TargetOriginId: s3website
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods: [GET, HEAD]
+            CachedMethods: [GET, HEAD]
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+          # daily snapshots reuse the same keys (latest/...): never cache stale sets
+          - PathPattern: "/pub/NetBSD-daily/*"
+            TargetOriginId: s3website
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods: [GET, HEAD]
+            CachedMethods: [GET, HEAD]
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+
+  # scoped to the bucket only; assumed by the sync host instance
+  SyncRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: pkg-smolbsd-sync
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ec2.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: mirror-write
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: ListMirror
+                Effect: Allow
+                Action: s3:ListBucket
+                Resource: !Sub "arn:aws:s3:::${BucketName}"
+                Condition:
+                  StringLike: { "s3:prefix": ["pub", "pub/*"] }
+              - Sid: WriteMirror
+                Effect: Allow
+                Action: [s3:GetObject, s3:PutObject, s3:DeleteObject]
+                Resource:
+                  - !Sub "arn:aws:s3:::${BucketName}/pub/*"
+                  - !Sub "arn:aws:s3:::${BucketName}/pub"  # top redirect stub
+
+  SyncInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: pkg-smolbsd-sync
+      Roles: [!Ref SyncRole]
+
+Outputs:
+  DomainName:
+    Description: "CNAME pkg.smolbsd.org -> this value (answers A and AAAA)"
+    Value: !GetAtt Distribution.DomainName
+  DistributionId:
+    Value: !Ref Distribution
+  WebsiteURL:
+    Value: !GetAtt Bucket.WebsiteURL
+  RoleArn:
+    Value: !GetAtt SyncRole.Arn
+  InstanceProfileName:
+    Value: !Ref SyncInstanceProfile
