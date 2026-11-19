@@ -36,11 +36,12 @@
 #      whole subtree (packages AND netbsd-* sets) is auto-pruned.
 #      Refused unless the new release has actually landed; --no-cleanup
 #      keeps the old release. Preview with --dry-run --version 11.1.
-#   3. redeploy with MirrorVersion=11.1 (cache patterns track the release)
+#      No stack change needed: cache patterns are release-agnostic.
 #
-# Cache design (no invalidations needed): versioned .tgz names are immutable
-# and cached 24h (CachingOptimized); pkg_summary/index and the daily-updated
-# NetBSD-daily sets are never cached at the edge.
+# Cache design (no invalidations needed): default behavior is UNCACHED
+# (listings, stubs, root, summaries, daily sets always fresh); the one
+# cache behavior matches immutable versioned .tgz names (CachingOptimized
+# 24h) - a release switch or prune is therefore visible immediately.
 
 Parameters:
   BucketName:
@@ -53,8 +54,8 @@ Parameters:
     Type: String
     Default: "11.0"
     Description: >-
-      NetBSD release the mirror tracks (repo `release` file). Bump BOTH this
-      parameter and the release file when smolBSD moves to a new major.
+      Tagged on the distribution as TrackedRelease for console visibility;
+      the repo `release` file is the real knob the sync reads.
   AcmCertificateArn:
     Type: String
     Description: ACM certificate (us-east-1) for the CloudFront alias
@@ -107,6 +108,9 @@ Resources:
   Distribution:
     Type: AWS::CloudFront::Distribution
     Properties:
+      Tags:
+        - Key: TrackedRelease
+          Value: !Ref MirrorVersion       # visible in console; repo `release` file is the real knob
       DistributionConfig:
         Enabled: true
         HttpVersion: http2
@@ -131,36 +135,20 @@ Resources:
           ViewerProtocolPolicy: redirect-to-https
           AllowedMethods: [GET, HEAD]
           CachedMethods: [GET, HEAD]
-          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6   # CachingOptimized
+          # Default UNCACHED: pages, stubs, root and summaries are always
+          # fresh. Path patterns match the REQUEST path (/pub/), and the
+          # website endpoint resolves index.html behind CloudFront, so
+          # no-cache behaviors on listings are impossible - invert instead:
+          # only immutable .tgz files are cached (single behavior below).
+          CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad   # CachingDisabled
         CacheBehaviors:
-          # browsable root (DefaultRootObject page): always fresh
-          - PathPattern: "/"
+          # the only cacheable objects: versioned, immutable package files
+          - PathPattern: "/pub/pkgsrc/packages/NetBSD/*/*/All/*.tgz"
             TargetOriginId: s3website
             ViewerProtocolPolicy: redirect-to-https
             AllowedMethods: [GET, HEAD]
             CachedMethods: [GET, HEAD]
-            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad  # CachingDisabled
-          # trimmed summaries: always fresh
-          - PathPattern: !Sub "/pub/pkgsrc/packages/NetBSD/*/${MirrorVersion}/All/pkg_summary.*"
-            TargetOriginId: s3website
-            ViewerProtocolPolicy: redirect-to-https
-            AllowedMethods: [GET, HEAD]
-            CachedMethods: [GET, HEAD]
-            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad  # CachingDisabled
-          # generated directory listings at any depth: always fresh
-          - PathPattern: "/*/index.html"   # patterns MUST start with '/'
-            TargetOriginId: s3website
-            ViewerProtocolPolicy: redirect-to-https
-            AllowedMethods: [GET, HEAD]
-            CachedMethods: [GET, HEAD]
-            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
-          # daily snapshots reuse the same keys (latest/...): never cache stale sets
-          - PathPattern: "/pub/NetBSD-daily/*"
-            TargetOriginId: s3website
-            ViewerProtocolPolicy: redirect-to-https
-            AllowedMethods: [GET, HEAD]
-            CachedMethods: [GET, HEAD]
-            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+            CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6   # CachingOptimized
 
   # scoped to the bucket only; assumed by the sync host instance
   SyncRole:
