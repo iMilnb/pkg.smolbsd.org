@@ -148,7 +148,7 @@ Resources:
             CachedMethods: [GET, HEAD]
             CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad  # CachingDisabled
           # generated directory listings at any depth: always fresh
-          - PathPattern: "*/index.html"
+          - PathPattern: "/*/index.html"   # patterns MUST start with '/'
             TargetOriginId: s3website
             ViewerProtocolPolicy: redirect-to-https
             AllowedMethods: [GET, HEAD]
