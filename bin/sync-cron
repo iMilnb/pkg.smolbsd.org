@@ -47,7 +47,7 @@ fi
 
 {
     echo "=== $(date -u '+%Y-%m-%d %H:%M:%S') start $job"
-    "$repo/bin/sync.py" --bucket "$bucket" "$job" --no-cache
+    "$repo/bin/sync.py" "$job" --bucket "$bucket" --no-cache
     rc=$?
     echo "=== $(date -u '+%Y-%m-%d %H:%M:%S') end $job: exit $rc"
 } >> "$log" 2>&1

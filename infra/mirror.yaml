@@ -21,7 +21,9 @@
 # in the SERVER timezone (sync host clock is UTC):
 #   17 5 * * *  cd $HOME/src/pkg.smolbsd.org && ./bin/sync-cron sets
 #   23 5 * * 0  cd $HOME/src/pkg.smolbsd.org && ./bin/sync-cron packages
-# Direct invocation (manual, no wrapper): ./bin/sync.py --bucket pkg.smolbsd.org sets --no-cache
+# Direct invocation (manual, no wrapper): ./bin/sync.py sets --bucket pkg.smolbsd.org --no-cache
+# (NOTE: --bucket et al. are SUBCOMMAND-level flags: `sync.py sets --bucket ...`, never
+#  `sync.py --bucket ... sets` — argparse rejects the latter with exit 2.)
 # If cdn.netbsd.org times out, point sync.py at another NetBSD mirror root:
 #   --source https://<mirror>  |  PKG_SMOLBSD_SOURCE env  |  repo `source` file
 # The root must carry BOTH pub/pkgsrc/packages/NetBSD and pub/NetBSD-daily
