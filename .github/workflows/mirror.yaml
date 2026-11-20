@@ -1,0 +1,118 @@
+# GitHub-side automation for pkg.smolbsd.org.
+#
+# 1. mirror-watch      daily 07:00 UTC — heartbeat: the generated index pages
+#                      are rewritten by EVERY successful sync, so a fresh
+#                      Last-Modified proves the whole chain cron -> sync -> S3
+#                      -> CloudFront is alive. Stale > 26 h = failed workflow
+#                      = email to the repo owner (GitHub scheduled-failure mail).
+# 2. manifest-check    every PR/push touching manifests or tooling — hard gate:
+#                      verify_deps.py must resolve all 600+ DEPENDS edges.
+# 3. manifest-refresh  Monday 06:00 UTC + manual — regenerate manifests from
+#                      live smolBSD + live pkg_summary; open a PR on drift.
+#                      Merging the PR = the reviewed change; the mirror picks
+#                      it up on the next Sunday packages sync.
+
+name: mirror
+
+on:
+  schedule:
+    - cron: '0 7 * * *'   # heartbeat, daily (UTC!)
+    - cron: '0 6 * * 1'   # manifest refresh, Monday (UTC!)
+  workflow_dispatch: {}
+  pull_request:
+    paths: ['manifest/**', 'bin/needs.py', 'bin/closure.py', 'bin/verify_deps.py', 'release']
+  push:
+    branches: [main]
+    paths: ['manifest/**', 'bin/needs.py', 'bin/closure.py', 'bin/verify_deps.py', 'release']
+
+permissions:
+  contents: read
+
+jobs:
+  mirror-watch:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - name: heartbeat check
+        run: |
+          python3 - <<'EOF'
+          import datetime, email.utils, sys, urllib.request
+          url = "https://pkg.smolbsd.org/pub/index.html"
+          req = urllib.request.Request(
+              url, method="HEAD", headers={"User-Agent": "pkg-smolbsd-watch"})
+          with urllib.request.urlopen(req, timeout=60) as r:
+              code, lm = r.status, r.headers.get("Last-Modified")
+          print(f"HTTP {code}, Last-Modified: {lm}")
+          if code != 200 or not lm:
+              sys.exit(f"heartbeat object not served (HTTP {code})")
+          age = datetime.datetime.now(datetime.timezone.utc) \
+              - email.utils.parsedate_to_datetime(lm)
+          print(f"heartbeat age: {age}")
+          if age > datetime.timedelta(hours=26):
+              sys.exit(f"MIRROR HEARTBEAT STALE ({age}) - sync cron did not "
+                       "run or every run failed; check sync host log")
+          EOF
+
+  manifest-check:
+    if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - name: verify committed manifests (audit gate)
+        run: |
+          for arch in x86_64 aarch64; do
+              python3 bin/verify_deps.py --manifest "manifest/needed-$arch.txt" --arch "$arch"
+          done
+
+  manifest-refresh:
+    if: (github.event_name == 'schedule' && github.event.schedule == '0 6 * * 1') || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - name: clone smolBSD (package-list source of truth)
+        uses: actions/checkout@v4
+        with:
+          repository: NetBSDfr/smolBSD
+          path: ../smolBSD
+          ref: main
+      - name: regenerate manifests from live tree
+        run: |
+          rel=$(cat release)
+          python3 bin/needs.py ../smolBSD > names.txt
+          for arch in x86_64 aarch64; do
+              python3 bin/closure.py --list names.txt --arch "$arch" \
+                  --version "$rel" --out "manifest/needed-$arch.txt"
+              rc=$?
+              # exit 3 = unresolved seed names (known upstream smolBSD bugs,
+              # listed in README/plan) - tolerable; anything else is fatal.
+              case "$rc" in 0|3) ;; *) exit "$rc" ;; esac
+              test -s "manifest/needed-$arch.txt"
+          done
+      - name: verify_deps gate
+        run: |
+          for arch in x86_64 aarch64; do
+              python3 bin/verify_deps.py --manifest "manifest/needed-$arch.txt" --arch "$arch"
+          done
+      - name: open PR on drift
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if git diff --quiet -- manifest/; then
+              echo "no drift, nothing to do"; exit 0
+          fi
+          branch="regen/$(date -u +%F)"
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$branch"
+          git add manifest/
+          git commit -m "manifest: weekly regen against live tree ($(date -u +%F))"
+          git push -u origin "$branch"
+          gh pr create --fill --base main --head "$branch" \
+              --title "manifest: weekly regen $(date -u +%F)"
