@@ -121,10 +121,11 @@ jobs:
           # instead of being silently dropped by closure.py's exit 3
           # tolerance; a missing aarch64 build only warns (arch-specific
           # packages exist upstream)
-          grep -v '^#' addpkgs.txt | awk '{print $1}' > addpkgs.names \
+          grep -v '^#' addpkgs.txt | awk 'NF {print $1}' > addpkgs.names \
               || true
           missing=""
           while read -r n; do
+              [ -n "$n" ] || continue
               awk -F'\t' -v n="$n" 'index($1, n "-") == 1 { found=1 } END { exit !found }' \
                   manifest/needed-x86_64.txt || missing="$missing $n"
           done < addpkgs.names
@@ -133,6 +134,7 @@ jobs:
               exit 1
           fi
           while read -r n; do
+              [ -n "$n" ] || continue
               awk -F'\t' -v n="$n" 'index($1, n "-") == 1 { found=1 } END { exit !found }' \
                   manifest/needed-aarch64.txt \
                   || echo "::warning::addpkg $n has no aarch64 build - not mirrored"
