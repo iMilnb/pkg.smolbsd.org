@@ -32,6 +32,7 @@ py314-matplotlib
 py314-maturin
 py314-ninja
 py314-pandas
+py314-uvloop
 python313
 rust-bin
 unzip
