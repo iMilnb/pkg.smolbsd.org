@@ -9,8 +9,9 @@
 #                      verify_deps.py must resolve all 600+ DEPENDS edges.
 # 3. manifest-refresh  Monday 06:00 UTC + manual + on addpkgs.txt pushes —
 #                      regenerate manifests from live smolBSD + live
-#                      pkg_summary (plus addpkgs.txt extras); open a PR on
-#                      drift. Merging the PR = the reviewed change; the
+#                      pkg_summary (plus addpkgs.txt extras); commits any
+#                      drift straight to main (the in-job gates are the
+#                      review); the
 #                      mirror picks it up on the next packages sync.
 
 name: mirror
@@ -72,7 +73,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      pull-requests: write
     steps:
       - uses: actions/checkout@v4
       - name: decide whether to regen
@@ -117,7 +117,7 @@ jobs:
         if: env.PROCEED == 'true'
         run: |
           # every package explicitly requested in addpkgs.txt must land in
-          # the x86_64 manifest - a typo or retired name stops the PR here
+          # the x86_64 manifest - a typo or retired name stops the run here
           # instead of being silently dropped by closure.py's exit 3
           # tolerance; a missing aarch64 build only warns (arch-specific
           # packages exist upstream)
@@ -145,20 +145,17 @@ jobs:
           for arch in x86_64 aarch64; do
               python3 bin/verify_deps.py --manifest "manifest/needed-$arch.txt" --arch "$arch"
           done
-      - name: open PR on drift
+      - name: commit drift straight to main
         if: env.PROCEED == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
+          # no review dance: the manifest is a generated package list and
+          # both gates above already vetted it; a failed run leaves the
+          # tree untouched, a green run's push IS the reviewed artifact
           if git diff --quiet -- manifest/; then
               echo "no drift, nothing to do"; exit 0
           fi
-          branch="regen/$(date -u +%F)"
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git checkout -B "$branch"
           git add manifest/
           git commit -m "manifest: regen against live tree ($(date -u +%F))"
-          git push --force-with-lease -u origin "$branch"
-          gh pr create --fill --base main --head "$branch" \
-              --title "manifest: weekly regen $(date -u +%F)"
+          git push origin HEAD:refs/heads/main

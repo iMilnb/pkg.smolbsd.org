@@ -24,7 +24,7 @@
 # Manifest freshness: the packages job curls manifest/needed-<arch>.txt from
 # GitHub main at run time (sync-cron validates each download, keeps its
 # last-good copy in ~/.pkg-smolbsd-manifest on failure and flags the run
-# DEGRADED). A merged manifest-regen PR is therefore live on the very next
+# DEGRADED). A manifest-regen commit on main is therefore live on the very next
 # sync WITHOUT git pull on the sync host; git pull is only needed for CODE
 # changes.
 # Direct invocation (manual, no wrapper): ./bin/sync.py sets --bucket pkg.smolbsd.org --no-cache
@@ -40,7 +40,8 @@
 # pkgsrc name per line, # comments). A push touching addpkgs.txt triggers
 # manifest-refresh immediately (besides Monday/manual): manifests regen with
 # the extras, the gate requires every addpkg in the x86_64 manifest
-# (aarch64-only gap = warning), and a regen PR opens; merge = live next
+# (aarch64-only gap = warning), and any drift is committed straight to
+# main; live next
 # packages sync. Local regen (same as CI):
 #   python3 bin/needs.py ../smolBSD --addpkgs addpkgs.txt > names.txt
 #   python3 bin/closure.py --list names.txt --arch x86_64 --out manifest/needed-x86_64.txt

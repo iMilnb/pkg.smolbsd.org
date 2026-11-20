@@ -4,9 +4,10 @@
 # the tracked release tree is mirrored, dependencies are resolved
 # automatically). # starts a comment.
 #
-# Pushing a change to this file regenerates the manifests and opens a regen
-# PR right away (.github/workflows/mirror.yaml); merging it makes the
-# packages live on the very next sync. A requested name that does not exist
+# Pushing a change to this file regenerates the manifests; when they drift,
+# CI commits the new manifests straight to main (.github/workflows/mirror.yaml
+# - verify_deps + this gate are the review) and the packages become live on
+# the very next sync. A requested name that does not exist
 # in the x86_64 tree fails the regen instead of being silently dropped.
 #
 # Source of truth is COMMITTED smolBSD main: packages needed only by
