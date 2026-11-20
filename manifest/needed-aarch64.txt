@@ -1,5 +1,5 @@
 # pkg.smolbsd.org manifest - pkgsrc 11.0 / aarch64
-# 99 seeds -> 306 packages, 2766 MB compressed
+# 99 seeds -> 307 packages, 2769 MB compressed
 Inter-UI-3.19.tgz	5636582
 JetBrainsMono-ttf-2.242.tgz	2712373
 LuaJIT2-2.1.1713773202nb1.tgz	992816
@@ -147,6 +147,7 @@ mpfr-4.2.1.tgz	751207
 mpg123-1.33.7.tgz	544489
 neovim-0.12.5.tgz	9662131
 nerd-fonts-JetBrainsMono-3.5.1.tgz	134035027
+nerd-fonts-Symbols-3.5.1.tgz	3054718
 nettle-4.0.tgz	12589983
 nghttp2-1.70.0.tgz	283237
 nghttp3-1.18.0.tgz	206652
