@@ -9,6 +9,4 @@
 # packages live on the very next sync. A requested name that does not exist
 # in the x86_64 tree fails the regen instead of being silently dropped.
 #
-# Example:
-# htop
-# glances
+htop
