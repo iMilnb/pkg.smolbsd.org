@@ -36,6 +36,15 @@
 # (https://www.netbsd.org/mirrors/). Verified 2026-11: ftp.netbsd.org serves
 # pkgsrc packages but NOT NetBSD-daily; nycdn.netbsd.org (sets default)
 # serves both trees. Interrupted runs resume: uploaded files are skipped.
+# Extra packages on top of the smolBSD service lists: addpkgs.txt (one bare
+# pkgsrc name per line, # comments). A push touching addpkgs.txt triggers
+# manifest-refresh immediately (besides Monday/manual): manifests regen with
+# the extras, the gate requires every addpkg in the x86_64 manifest
+# (aarch64-only gap = warning), and a regen PR opens; merge = live next
+# packages sync. Local regen (same as CI):
+#   python3 bin/needs.py ../smolBSD --addpkgs addpkgs.txt > names.txt
+#   python3 bin/closure.py --list names.txt --arch x86_64 --out manifest/needed-x86_64.txt
+#   python3 bin/closure.py --list names.txt --arch aarch64 --out manifest/needed-aarch64.txt
 # After every manifest regeneration, audit it independently:
 #   python3 bin/verify_deps.py --manifest manifest/needed-x86_64.txt --arch x86_64
 #   python3 bin/verify_deps.py --manifest manifest/needed-aarch64.txt --arch aarch64

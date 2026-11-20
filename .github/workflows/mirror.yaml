@@ -7,10 +7,11 @@
 #                      = email to the repo owner (GitHub scheduled-failure mail).
 # 2. manifest-check    every PR/push touching manifests or tooling — hard gate:
 #                      verify_deps.py must resolve all 600+ DEPENDS edges.
-# 3. manifest-refresh  Monday 06:00 UTC + manual — regenerate manifests from
-#                      live smolBSD + live pkg_summary; open a PR on drift.
-#                      Merging the PR = the reviewed change; the mirror picks
-#                      it up on the next Sunday packages sync.
+# 3. manifest-refresh  Monday 06:00 UTC + manual + on addpkgs.txt pushes —
+#                      regenerate manifests from live smolBSD + live
+#                      pkg_summary (plus addpkgs.txt extras); open a PR on
+#                      drift. Merging the PR = the reviewed change; the
+#                      mirror picks it up on the next packages sync.
 
 name: mirror
 
@@ -23,7 +24,7 @@ on:
     paths: ['manifest/**', 'bin/needs.py', 'bin/closure.py', 'bin/verify_deps.py', 'release']
   push:
     branches: [main]
-    paths: ['manifest/**', 'bin/needs.py', 'bin/closure.py', 'bin/verify_deps.py', 'release']
+    paths: ['manifest/**', 'addpkgs.txt', 'bin/needs.py', 'bin/closure.py', 'bin/verify_deps.py', 'release']
 
 permissions:
   contents: read
@@ -67,7 +68,7 @@ jobs:
           done
 
   manifest-refresh:
-    if: (github.event_name == 'schedule' && github.event.schedule == '0 6 * * 1') || github.event_name == 'workflow_dispatch'
+    if: (github.event_name == 'schedule' && github.event.schedule == '0 6 * * 1') || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && (contains(github.event.head_commit.added, 'addpkgs.txt') || contains(github.event.head_commit.modified, 'addpkgs.txt') || contains(github.event.head_commit.removed, 'addpkgs.txt')))
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -85,7 +86,7 @@ jobs:
       - name: regenerate manifests from live tree
         run: |
           rel=$(cat release)
-          python3 bin/needs.py ../smolBSD > names.txt
+          python3 bin/needs.py ../smolBSD --addpkgs addpkgs.txt > names.txt
           for arch in x86_64 aarch64; do
               python3 bin/closure.py --list names.txt --arch "$arch" \
                   --version "$rel" --out "manifest/needed-$arch.txt"
@@ -95,6 +96,29 @@ jobs:
               case "$rc" in 0|3) ;; *) exit "$rc" ;; esac
               test -s "manifest/needed-$arch.txt"
           done
+      - name: addpkgs resolution gate
+        run: |
+          # every package explicitly requested in addpkgs.txt must land in
+          # the x86_64 manifest - a typo or retired name stops the PR here
+          # instead of being silently dropped by closure.py's exit 3
+          # tolerance; a missing aarch64 build only warns (arch-specific
+          # packages exist upstream)
+          grep -v '^#' addpkgs.txt | awk '{print $1}' > addpkgs.names \
+              || true
+          missing=""
+          while read -r n; do
+              awk -F'\t' -v n="$n" 'index($1, n "-") == 1 { found=1 } END { exit !found }' \
+                  manifest/needed-x86_64.txt || missing="$missing $n"
+          done < addpkgs.names
+          if [ -n "$missing" ]; then
+              echo "addpkgs.txt names not in the x86_64 manifest:$missing"
+              exit 1
+          fi
+          while read -r n; do
+              awk -F'\t' -v n="$n" 'index($1, n "-") == 1 { found=1 } END { exit !found }' \
+                  manifest/needed-aarch64.txt \
+                  || echo "::warning::addpkg $n has no aarch64 build - not mirrored"
+          done < addpkgs.names
       - name: verify_deps gate
         run: |
           for arch in x86_64 aarch64; do
@@ -112,7 +136,7 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git checkout -b "$branch"
           git add manifest/
-          git commit -m "manifest: weekly regen against live tree ($(date -u +%F))"
+          git commit -m "manifest: regen against live tree ($(date -u +%F))"
           git push -u origin "$branch"
           gh pr create --fill --base main --head "$branch" \
               --title "manifest: weekly regen $(date -u +%F)"

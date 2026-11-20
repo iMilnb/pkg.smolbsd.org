@@ -1,0 +1,13 @@
+# pkg.smolbsd.org - packages to mirror BEYOND what the smolBSD services need.
+#
+# One bare pkgsrc package name per line (no versions - the newest build in
+# the tracked release tree is mirrored, dependencies are resolved
+# automatically). # starts a comment.
+#
+# Pushing a change to this file regenerates the manifests and opens a regen
+# PR right away (.github/workflows/mirror.yaml); merging it makes the
+# packages live on the very next sync. A requested name that does not exist
+# in the x86_64 tree fails the regen instead of being silently dropped.
+#
+# Example:
+# htop

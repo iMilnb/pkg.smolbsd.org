@@ -145,16 +145,47 @@ def scan_repo(repo):
     return names, warnings
 
 
+def load_addpkgs(paths):
+    """Extra seed names from addpkgs-style files; strict on junk.
+
+    One bare package name per line; # comments allowed. Versioned tokens
+    are refused - the mirror always tracks the newest build in the tree.
+    """
+    names = set()
+    for path in paths:
+        try:
+            f = open(path)
+        except OSError as err:
+            sys.exit(f"needs.py: cannot read --addpkgs file: {err}")
+        with f:
+            for lineno, line in enumerate(f, 1):
+                line = line.split("#", 1)[0]
+                for tok in line.split():
+                    if not PKG_OK.match(tok):
+                        sys.exit(f"needs.py: {path}:{lineno}: "
+                                 f"invalid package name: {tok}")
+                    if re.search(r"-(?=[0-9])", tok):
+                        bare = re.split(r"-(?=[0-9])", tok)[0]
+                        sys.exit(f"needs.py: {path}:{lineno}: no versions "
+                                 f"in addpkgs: {tok} -> use {bare}")
+                    names.add(tok)
+    return names
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("repo", nargs="?", default="../smolBSD",
                     help="smolBSD checkout (default: %(default)s)")
+    ap.add_argument("--addpkgs", action="append", default=[], metavar="FILE",
+                    help="file of extra package names merged into the seed "
+                         "set (bare names, # comments; repeatable)")
     args = ap.parse_args()
     if not (os.path.isdir(os.path.join(args.repo, "service"))
             and os.path.isdir(os.path.join(args.repo, "smolerfiles"))):
         sys.exit(f"needs.py: not a smolBSD repo: {args.repo}")
 
     names, warnings = scan_repo(args.repo)
+    names.update(load_addpkgs(args.addpkgs))
     for w in warnings:
         print(w, file=sys.stderr)
     for name in sorted(names):
