@@ -9,4 +9,32 @@
 # packages live on the very next sync. A requested name that does not exist
 # in the x86_64 tree fails the regen instead of being silently dropped.
 #
+# BRIDGE BLOCK: services present in development branches of smolBSD but not
+# yet merged into main. CI regenerates from main, so until those services
+# land upstream their packages would fall out of the mirror. Remove a line
+# here once its service is in smolBSD main (duplicate names are harmless;
+# the closure dedupes). The four known-bad py311/py314 seed names (aiohttp,
+# pillow, uvloop, py314-pillow) are NOT listed: they do not exist in the
+# tree and the addpkgs gate would refuse them.
+gawk
+git
+lsof
+nodejs
+open-simh
+psmisc
+py311-cryptography
+py311-maturin
+py313-pip
+py314-aiohttp
+py314-cryptography
+py314-lxml
+py314-matplotlib
+py314-maturin
+py314-ninja
+py314-pandas
+python313
+rust-bin
+unzip
+
+# user-requested extras:
 htop
