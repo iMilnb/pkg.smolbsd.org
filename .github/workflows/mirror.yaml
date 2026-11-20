@@ -63,28 +63,44 @@ jobs:
         with: { python-version: '3.12' }
       - name: verify committed manifests (audit gate)
         run: |
-          echo "DEBUG added=${{ toJSON(github.event.head_commit.added) }} modified=${{ toJSON(github.event.head_commit.modified) }}"
           for arch in x86_64 aarch64; do
               python3 bin/verify_deps.py --manifest "manifest/needed-$arch.txt" --arch "$arch"
           done
 
   manifest-refresh:
-    if: (github.event_name == 'schedule' && github.event.schedule == '0 6 * * 1') || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && (contains(github.event.head_commit.added, 'addpkgs.txt') || contains(github.event.head_commit.modified, 'addpkgs.txt') || contains(github.event.head_commit.removed, 'addpkgs.txt')))
+    if: (github.event_name == 'schedule' && github.event.schedule == '0 6 * * 1') || github.event_name == 'workflow_dispatch' || github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
       contents: write
       pull-requests: write
     steps:
       - uses: actions/checkout@v4
+      - name: decide whether to regen
+        run: |
+          # pushes are gated on git itself, not the webhook payload
+          # (head_commit.added/modified can be null in the job context)
+          case "${{ github.event_name }}" in
+              schedule|workflow_dispatch)
+                  echo PROCEED=true >> "$GITHUB_ENV"; exit ;;
+          esac
+          if git show -m --name-only --pretty=format: HEAD | grep -qx 'addpkgs.txt'; then
+              echo "push touches addpkgs.txt - regenerating"
+              echo PROCEED=true >> "$GITHUB_ENV"
+          else
+              echo "push does not touch addpkgs.txt - nothing to regen"
+          fi
       - uses: actions/setup-python@v5
+        if: env.PROCEED == 'true'
         with: { python-version: '3.12' }
       - name: clone smolBSD (package-list source of truth)
+        if: env.PROCEED == 'true'
         uses: actions/checkout@v4
         with:
           repository: NetBSDfr/smolBSD
           path: ../smolBSD
           ref: main
       - name: regenerate manifests from live tree
+        if: env.PROCEED == 'true'
         run: |
           rel=$(cat release)
           python3 bin/needs.py ../smolBSD --addpkgs addpkgs.txt > names.txt
@@ -98,6 +114,7 @@ jobs:
               test -s "manifest/needed-$arch.txt"
           done
       - name: addpkgs resolution gate
+        if: env.PROCEED == 'true'
         run: |
           # every package explicitly requested in addpkgs.txt must land in
           # the x86_64 manifest - a typo or retired name stops the PR here
@@ -121,11 +138,13 @@ jobs:
                   || echo "::warning::addpkg $n has no aarch64 build - not mirrored"
           done < addpkgs.names
       - name: verify_deps gate
+        if: env.PROCEED == 'true'
         run: |
           for arch in x86_64 aarch64; do
               python3 bin/verify_deps.py --manifest "manifest/needed-$arch.txt" --arch "$arch"
           done
       - name: open PR on drift
+        if: env.PROCEED == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
