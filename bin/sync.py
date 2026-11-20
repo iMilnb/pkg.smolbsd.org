@@ -743,9 +743,9 @@ def index_html(files, title, base="", show_parent=True):
     lines.append("</head><body>")
     lines.append(f"<h1>Index of {title}</h1>")
     if show_parent:
-        lines.append('<a href="../">../</a>')
+        lines.append('<a href="../">../</a><br />')
     for f in sorted(files):
-        lines.append(f'<a href="{f}">{f}</a>')
+        lines.append(f'<a href="{f}">{f}</a><br />')
     lines.append("</body></html>")
     return "\n".join(lines).encode()
 
