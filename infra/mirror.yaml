@@ -16,9 +16,12 @@
 #      (IPV6Enabled makes that hostname answer both A and AAAA; the legacy
 #      "dualstack." prefix is no longer needed/deprecated for new distros)
 #
-# Sync (crontab on sync host, small disk -> stream with --no-cache):
-#   17 5 * * * cd ~/src/pkg.smolbsd.org && python3 bin/sync.py sets     --bucket pkg.smolbsd.org --no-cache >> /var/log/pkg-smolbsd-sync.log 2>&1
-#   23 5 * * 0 cd ~/src/pkg.smolbsd.org && python3 bin/sync.py packages --bucket pkg.smolbsd.org --no-cache >> /var/log/pkg-smolbsd-sync.log 2>&1
+# Sync (crontab on sync host; bin/sync-cron wraps sync.py: lock + log rotation
+# + optional healthcheck ping, see header of bin/sync-cron). NOTE: cron runs
+# in the SERVER timezone (sync host clock is UTC):
+#   17 5 * * *  cd $HOME/src/pkg.smolbsd.org && ./bin/sync-cron sets
+#   23 5 * * 0  cd $HOME/src/pkg.smolbsd.org && ./bin/sync-cron packages
+# Direct invocation (manual, no wrapper): ./bin/sync.py --bucket pkg.smolbsd.org sets --no-cache
 # If cdn.netbsd.org times out, point sync.py at another NetBSD mirror root:
 #   --source https://<mirror>  |  PKG_SMOLBSD_SOURCE env  |  repo `source` file
 # The root must carry BOTH pub/pkgsrc/packages/NetBSD and pub/NetBSD-daily

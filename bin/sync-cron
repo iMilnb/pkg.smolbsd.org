@@ -1,0 +1,68 @@
+#!/bin/sh
+# pkg.smolbsd.org cron wrapper: exclusive lock, size-capped log, sync, ping.
+#
+# usage: sync-cron sets|packages
+#
+# Crontab (no redirections needed, the wrapper owns the log):
+#   17 5 * * *  cd $HOME/src/pkg.smolbsd.org && ./bin/sync-cron sets
+#   23 5 * * 0  cd $HOME/src/pkg.smolbsd.org && ./bin/sync-cron packages
+#
+# Healthcheck pings (optional, create checks at healthchecks.io or similar):
+# put the two URLs in $PING_URL_FILE (default: <repo>/ping_urls, gitignored):
+#   sets=https://hc-ping.com/<uuid-sets>
+#   packages=https://hc-ping.com/<uuid-packages>
+# A successful sync pings <url>; a failed sync pings <url>/fail with the last
+# log lines attached. The check itself must be configured with the job's cron
+# schedule (in the SERVER timezone!) plus a grace period (4h sets / 12h pkgs),
+# so a missing run = "sync didn't even start" also alerts.
+# Without ping_urls this wrapper still locks + rotates and exits with the
+# sync status, so nothing is required to run it from day one.
+
+job=$1
+if [ "$job" != sets ] && [ "$job" != packages ]; then
+    echo "usage: $0 sets|packages" >&2
+    exit 2
+fi
+
+repo=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+log=${SMOLBSD_LOG:-$HOME/pkg-smolbsd-sync.log}
+lockd=${SMOLBSD_LOCK:-/tmp/pkg-smolbsd.lock.dir}
+maxbytes=5242880
+pings=${PING_URL_FILE:-$repo/ping_urls}
+bucket=${BUCKET:-pkg.smolbsd.org}
+curl=${CURL:-curl}
+
+# atomic single-instance guard (mkdir(2) is atomic; no flock dependency)
+if ! mkdir "$lockd" 2>/dev/null; then
+    echo "sync-cron: another sync is running, skipping $job" >> "$log"
+    exit 0
+fi
+trap 'rmdir "$lockd" 2>/dev/null' EXIT INT TERM
+
+# log rotation by size (no logrotate/newsyslog dependency)
+touch "$log"
+if [ "$(wc -c < "$log")" -gt "$maxbytes" ]; then
+    mv "$log" "$log.1"
+fi
+
+{
+    echo "=== $(date -u '+%Y-%m-%d %H:%M:%S') start $job"
+    "$repo/bin/sync.py" --bucket "$bucket" "$job" --no-cache
+    rc=$?
+    echo "=== $(date -u '+%Y-%m-%d %H:%M:%S') end $job: exit $rc"
+} >> "$log" 2>&1
+
+url=""
+[ -f "$pings" ] && url=$(sed -n "s|^$job=||p" "$pings" | head -n 1)
+if [ -n "$url" ]; then
+    if [ "$rc" -eq 0 ]; then
+        "$curl" -fsS -m 30 "$url" >/dev/null 2>&1 \
+            || echo "sync-cron: success ping failed" >> "$log"
+    else
+        tail -n 20 "$log" | "$curl" -fsS -m 30 --data-binary @- "$url/fail" \
+            >/dev/null 2>&1 \
+            || echo "sync-cron: fail ping failed" >> "$log"
+    fi
+    exit 0  # ping is the alert channel; don't also fill cron mail
+fi
+exit "$rc"
