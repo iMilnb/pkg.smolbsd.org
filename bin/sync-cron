@@ -1,5 +1,5 @@
 #!/bin/sh
-# pkg.smolbsd.org cron wrapper: exclusive lock, size-capped log, sync, ping.
+# pkg.smolbsd.org cron wrapper: exclusive lock, size-capped log, sync.
 #
 # usage: sync-cron sets|packages
 #
@@ -7,16 +7,7 @@
 #   17 5 * * *  cd $HOME/src/pkg.smolbsd.org && ./bin/sync-cron sets
 #   23 5 * * 0  cd $HOME/src/pkg.smolbsd.org && ./bin/sync-cron packages
 #
-# Healthcheck pings (optional, create checks at healthchecks.io or similar):
-# put the two URLs in $PING_URL_FILE (default: <repo>/ping_urls, gitignored):
-#   sets=https://hc-ping.com/<uuid-sets>
-#   packages=https://hc-ping.com/<uuid-packages>
-# A successful sync pings <url>; a failed sync pings <url>/fail with the last
-# log lines attached. The check itself must be configured with the job's cron
-# schedule (in the SERVER timezone!) plus a grace period (4h sets / 12h pkgs),
-# so a missing run = "sync didn't even start" also alerts.
-# Without ping_urls this wrapper still locks + rotates and exits with the
-# sync status, so nothing is required to run it from day one.
+# The wrapper exits with the sync status (DEGRADED or failed runs exit 1).
 #
 # Manifest freshness (packages job): manifest/needed-<arch>.txt are fetched
 # from GitHub main at run time via curl, so merging a manifest regen PR takes
@@ -25,8 +16,8 @@
 # download is validated (non-empty, tab format, entry count plausible, never
 # less than half of the last-good copy) before it replaces the last-good
 # copy in $SMOLBSD_MANIFEST_DIR; a failed fetch keeps the last-good copy
-# (worst case: the repo checkout copy) and marks the run DEGRADED (exit 1 /
-# fail ping) - the mirror never syncs against an empty or truncated manifest.
+# (worst case: the repo checkout copy) and marks the run DEGRADED (exit 1)
+# - the mirror never syncs against an empty or truncated manifest.
 # Test hooks: SMOLBSD_RAW_BASE (default the raw.githubusercontent.com base),
 # SMOLBSD_MANIFEST_DIR (default ~/.pkg-smolbsd-manifest).
 
@@ -86,7 +77,6 @@ repo=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 log=${SMOLBSD_LOG:-$HOME/pkg-smolbsd-sync.log}
 lockd=${SMOLBSD_LOCK:-/tmp/pkg-smolbsd.lock.dir}
 maxbytes=5242880
-pings=${PING_URL_FILE:-$repo/ping_urls}
 bucket=${BUCKET:-pkg.smolbsd.org}
 curl=${CURL:-curl}
 raw_base=${SMOLBSD_RAW_BASE:-https://raw.githubusercontent.com/iMilnb/pkg.smolbsd.org/main}
@@ -138,17 +128,4 @@ fi
     echo "=== $(date -u '+%Y-%m-%d %H:%M:%S') end $job: exit $rc"
 } >> "$log" 2>&1
 
-url=""
-[ -f "$pings" ] && url=$(sed -n "s|^$job=||p" "$pings" | head -n 1)
-if [ -n "$url" ]; then
-    if [ "$rc" -eq 0 ]; then
-        "$curl" -fsS -m 30 "$url" >/dev/null 2>&1 \
-            || echo "sync-cron: success ping failed" >> "$log"
-    else
-        tail -n 20 "$log" | "$curl" -fsS -m 30 --data-binary @- "$url/fail" \
-            >/dev/null 2>&1 \
-            || echo "sync-cron: fail ping failed" >> "$log"
-    fi
-    exit 0  # ping is the alert channel; don't also fill cron mail
-fi
 exit "$rc"

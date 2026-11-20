@@ -17,7 +17,7 @@
 #      "dualstack." prefix is no longer needed/deprecated for new distros)
 #
 # Sync (crontab on the sync host; bin/sync-cron wraps sync.py: lock + log
-# rotation + optional healthcheck ping, see header of bin/sync-cron). NOTE:
+# rotation + manifest freshness, see header of bin/sync-cron). NOTE:
 # cron runs in the SERVER timezone (host clock is UTC):
 #   17 5 * * *  cd $HOME/src/pkg.smolbsd.org && ./bin/sync-cron sets
 #   23 5 * * 0  cd $HOME/src/pkg.smolbsd.org && ./bin/sync-cron packages
