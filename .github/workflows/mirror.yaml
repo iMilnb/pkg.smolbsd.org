@@ -63,6 +63,7 @@ jobs:
         with: { python-version: '3.12' }
       - name: verify committed manifests (audit gate)
         run: |
+          echo "DEBUG added=${{ toJSON(github.event.head_commit.added) }} modified=${{ toJSON(github.event.head_commit.modified) }}"
           for arch in x86_64 aarch64; do
               python3 bin/verify_deps.py --manifest "manifest/needed-$arch.txt" --arch "$arch"
           done

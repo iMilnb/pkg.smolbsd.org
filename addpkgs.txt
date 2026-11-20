@@ -11,3 +11,4 @@
 #
 # Example:
 # htop
+# glances
