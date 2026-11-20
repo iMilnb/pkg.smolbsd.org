@@ -97,13 +97,13 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: NetBSDfr/smolBSD
-          path: ../smolBSD
+          path: smolBSD-src
           ref: main
       - name: regenerate manifests from live tree
         if: env.PROCEED == 'true'
         run: |
           rel=$(cat release)
-          python3 bin/needs.py ../smolBSD --addpkgs addpkgs.txt > names.txt
+          python3 bin/needs.py smolBSD-src --addpkgs addpkgs.txt > names.txt
           for arch in x86_64 aarch64; do
               python3 bin/closure.py --list names.txt --arch "$arch" \
                   --version "$rel" --out "manifest/needed-$arch.txt"
