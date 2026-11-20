@@ -1,4 +1,4 @@
-# pkg.smolbsd.org — S3 website mirror + CloudFront + sync host sync role
+# pkg.smolbsd.org — S3 website mirror + CloudFront + sync-host IAM role
 #
 # Deploy (from a machine with deploy rights, e.g. this laptop):
 #   1. Request an ACM certificate for pkg.smolbsd.org IN us-east-1
@@ -16,16 +16,17 @@
 #      (IPV6Enabled makes that hostname answer both A and AAAA; the legacy
 #      "dualstack." prefix is no longer needed/deprecated for new distros)
 #
-# Sync (crontab on sync host; bin/sync-cron wraps sync.py: lock + log rotation
-# + optional healthcheck ping, see header of bin/sync-cron). NOTE: cron runs
-# in the SERVER timezone (sync host clock is UTC):
+# Sync (crontab on the sync host; bin/sync-cron wraps sync.py: lock + log
+# rotation + optional healthcheck ping, see header of bin/sync-cron). NOTE:
+# cron runs in the SERVER timezone (host clock is UTC):
 #   17 5 * * *  cd $HOME/src/pkg.smolbsd.org && ./bin/sync-cron sets
 #   23 5 * * 0  cd $HOME/src/pkg.smolbsd.org && ./bin/sync-cron packages
 # Manifest freshness: the packages job curls manifest/needed-<arch>.txt from
 # GitHub main at run time (sync-cron validates each download, keeps its
 # last-good copy in ~/.pkg-smolbsd-manifest on failure and flags the run
 # DEGRADED). A merged manifest-regen PR is therefore live on the very next
-# sync WITHOUT git pull on sync host; git pull is only needed for CODE changes.
+# sync WITHOUT git pull on the sync host; git pull is only needed for CODE
+# changes.
 # Direct invocation (manual, no wrapper): ./bin/sync.py sets --bucket pkg.smolbsd.org --no-cache
 # (NOTE: --bucket et al. are SUBCOMMAND-level flags: `sync.py sets --bucket ...`, never
 #  `sync.py --bucket ... sets` — argparse rejects the latter with exit 2.)
@@ -160,7 +161,7 @@ Resources:
             CachedMethods: [GET, HEAD]
             CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6   # CachingOptimized
 
-  # scoped to the bucket only; assumed by the sync host instance
+  # scoped to the bucket only; assumed by the sync host
   SyncRole:
     Type: AWS::IAM::Role
     Properties:

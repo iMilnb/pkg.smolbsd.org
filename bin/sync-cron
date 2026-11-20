@@ -20,7 +20,8 @@
 #
 # Manifest freshness (packages job): manifest/needed-<arch>.txt are fetched
 # from GitHub main at run time via curl, so merging a manifest regen PR takes
-# effect on the very next sync - no git pull on sync host in the loop. Every
+# effect on the very next sync - no git pull on the sync host in the loop.
+# Every
 # download is validated (non-empty, tab format, entry count plausible, never
 # less than half of the last-good copy) before it replaces the last-good
 # copy in $SMOLBSD_MANIFEST_DIR; a failed fetch keeps the last-good copy

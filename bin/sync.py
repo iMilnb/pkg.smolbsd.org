@@ -1086,7 +1086,7 @@ def main():
                              "instead of pruning them after a version bump")
     common.add_argument("--no-cache", action="store_true",
                         help="stream source to S3 without local copies "
-                             "(for small-root-disk  hosts)")
+                             "(for small-root-disk hosts)")
 
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = ap.add_subparsers(dest="mode", required=True)
