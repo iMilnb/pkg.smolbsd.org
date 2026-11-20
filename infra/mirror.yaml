@@ -21,6 +21,11 @@
 # in the SERVER timezone (sync host clock is UTC):
 #   17 5 * * *  cd $HOME/src/pkg.smolbsd.org && ./bin/sync-cron sets
 #   23 5 * * 0  cd $HOME/src/pkg.smolbsd.org && ./bin/sync-cron packages
+# Manifest freshness: the packages job curls manifest/needed-<arch>.txt from
+# GitHub main at run time (sync-cron validates each download, keeps its
+# last-good copy in ~/.pkg-smolbsd-manifest on failure and flags the run
+# DEGRADED). A merged manifest-regen PR is therefore live on the very next
+# sync WITHOUT git pull on sync host; git pull is only needed for CODE changes.
 # Direct invocation (manual, no wrapper): ./bin/sync.py sets --bucket pkg.smolbsd.org --no-cache
 # (NOTE: --bucket et al. are SUBCOMMAND-level flags: `sync.py sets --bucket ...`, never
 #  `sync.py --bucket ... sets` — argparse rejects the latter with exit 2.)

@@ -17,12 +17,69 @@
 # so a missing run = "sync didn't even start" also alerts.
 # Without ping_urls this wrapper still locks + rotates and exits with the
 # sync status, so nothing is required to run it from day one.
+#
+# Manifest freshness (packages job): manifest/needed-<arch>.txt are fetched
+# from GitHub main at run time via curl, so merging a manifest regen PR takes
+# effect on the very next sync - no git pull on sync host in the loop. Every
+# download is validated (non-empty, tab format, entry count plausible, never
+# less than half of the last-good copy) before it replaces the last-good
+# copy in $SMOLBSD_MANIFEST_DIR; a failed fetch keeps the last-good copy
+# (worst case: the repo checkout copy) and marks the run DEGRADED (exit 1 /
+# fail ping) - the mirror never syncs against an empty or truncated manifest.
+# Test hooks: SMOLBSD_RAW_BASE (default the raw.githubusercontent.com base),
+# SMOLBSD_MANIFEST_DIR (default ~/.pkg-smolbsd-manifest).
 
 job=$1
 if [ "$job" != sets ] && [ "$job" != packages ]; then
     echo "usage: $0 sets|packages" >&2
     exit 2
 fi
+
+# Never sync against a broken manifest: validate before promoting, fall back
+# to last-good, alert via DEGRADED (see header comment).
+valid_manifest() {  # $1 = candidate, $2 = last-good copy (optional)
+    [ -s "$1" ] || return 1
+    n=$(awk '
+        /^[[:space:]]*$/ { next }
+        /^#/             { next }
+        {
+            nf = split($0, a, "\t")
+            if (nf != 2 || a[1] == "" || a[2] !~ /^[0-9]+$/) bad = 1
+            n++
+        }
+        END { if (bad || n < 50 || n > 20000) exit 1; print n }' "$1") \
+        || return 1
+    if [ -f "$2" ]; then
+        p=$(awk '!/^[[:space:]]*$/ && !/^#/' "$2" | wc -l)
+        if [ "$n" -lt $((p / 2)) ]; then
+            echo "manifest: refused $n entries vs last-good $p (truncated download?)"
+            return 1
+        fi
+    fi
+    return 0
+}
+
+fetch_manifest() {  # $1 = arch; 0 fresh | 1 degraded fallback | 2 unusable
+    f="needed-$1.txt"
+    if "$curl" -fsSL -m 60 -o "$mdir/.new" "$raw_base/manifest/$f" \
+       && valid_manifest "$mdir/.new" "$mdir/$f"; then
+        mv "$mdir/.new" "$mdir/$f"
+        echo "manifest $f: fresh from main"
+        return 0
+    fi
+    rm -f "$mdir/.new"
+    if [ -f "$mdir/$f" ]; then
+        echo "manifest $f: DEGRADED fetch/validation failed, keeping last-good copy"
+        return 1
+    fi
+    if [ -f "$repo/manifest/$f" ]; then
+        cp "$repo/manifest/$f" "$mdir/$f" || return 2
+        echo "manifest $f: DEGRADED fetch failed, using repo checkout copy"
+        return 1
+    fi
+    echo "manifest $f: FATAL fetch failed and no last-good/checkout copy exists"
+    return 2
+}
 
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 log=${SMOLBSD_LOG:-$HOME/pkg-smolbsd-sync.log}
@@ -31,6 +88,8 @@ maxbytes=5242880
 pings=${PING_URL_FILE:-$repo/ping_urls}
 bucket=${BUCKET:-pkg.smolbsd.org}
 curl=${CURL:-curl}
+raw_base=${SMOLBSD_RAW_BASE:-https://raw.githubusercontent.com/iMilnb/pkg.smolbsd.org/main}
+mdir=${SMOLBSD_MANIFEST_DIR:-$HOME/.pkg-smolbsd-manifest}
 
 # atomic single-instance guard (mkdir(2) is atomic; no flock dependency)
 if ! mkdir "$lockd" 2>/dev/null; then
@@ -47,8 +106,34 @@ fi
 
 {
     echo "=== $(date -u '+%Y-%m-%d %H:%M:%S') start $job"
-    "$repo/bin/sync.py" "$job" --bucket "$bucket" --no-cache
-    rc=$?
+    degraded=0
+    nomani=0
+    if [ "$job" = packages ]; then
+        mkdir -p "$mdir"
+        for a in x86_64 aarch64; do
+            fetch_manifest "$a"
+            case $? in
+                0) ;;
+                1) degraded=1 ;;
+                *) nomani=1 ;;
+            esac
+        done
+    fi
+    if [ "$nomani" -eq 1 ]; then
+        rc=1
+        echo "=== $job aborted: no usable manifest (fetch failed, no fallback)"
+    elif [ "$job" = packages ]; then
+        "$repo/bin/sync.py" "$job" --bucket "$bucket" --no-cache \
+            --manifest-dir "$mdir"
+        rc=$?
+    else
+        "$repo/bin/sync.py" "$job" --bucket "$bucket" --no-cache
+        rc=$?
+    fi
+    if [ "$degraded" -eq 1 ] && [ "$rc" -eq 0 ]; then
+        rc=1
+        echo "=== $job succeeded but DEGRADED (stale manifest in use, see above)"
+    fi
     echo "=== $(date -u '+%Y-%m-%d %H:%M:%S') end $job: exit $rc"
 } >> "$log" 2>&1
 
