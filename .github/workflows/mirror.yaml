@@ -1,10 +1,12 @@
 # GitHub-side automation for pkg.smolbsd.org.
 #
-# 1. mirror-watch      daily 07:00 UTC — heartbeat: the generated index pages
-#                      are rewritten by EVERY successful sync, so a fresh
-#                      Last-Modified proves the whole chain cron -> sync -> S3
-#                      -> CloudFront is alive. Stale > 26 h = failed workflow
-#                      = email to the repo owner (GitHub scheduled-failure mail).
+# 1. mirror-watch      daily 07:00 UTC — heartbeat: sync.py rewrites
+#                      pub/heartbeat.txt on EVERY successful sync, so a
+#                      fresh Last-Modified proves the whole chain cron ->
+#                      sync -> S3 -> CloudFront is alive even when the run
+#                      uploads nothing. Stale > 26 h = failed workflow
+#                      = email to the repo owner (GitHub scheduled-failure
+#                      mail).
 # 2. manifest-check    every PR/push touching manifests or tooling — hard gate:
 #                      verify_deps.py must resolve all 600+ DEPENDS edges.
 # 3. manifest-refresh  Monday 06:00 UTC + manual + on addpkgs.txt pushes —
@@ -39,11 +41,28 @@ jobs:
         run: |
           python3 - <<'EOF'
           import datetime, email.utils, sys, urllib.request
-          url = "https://pkg.smolbsd.org/pub/index.html"
-          req = urllib.request.Request(
-              url, method="HEAD", headers={"User-Agent": "pkg-smolbsd-watch"})
-          with urllib.request.urlopen(req, timeout=60) as r:
-              code, lm = r.status, r.headers.get("Last-Modified")
+          # heartbeat.txt is rewritten by EVERY sync (sync.py); until it
+          # exists (first sync after deploy) fall back to the index page,
+          # which only moves when listings change
+          urls = ["https://pkg.smolbsd.org/pub/heartbeat.txt",
+                  "https://pkg.smolbsd.org/pub/index.html"]
+          code, lm = 0, None
+          for url in urls:
+              req = urllib.request.Request(
+                  url, method="HEAD",
+                  headers={"User-Agent": "pkg-smolbsd-watch"})
+              try:
+                  with urllib.request.urlopen(req, timeout=60) as r:
+                      code, lm = r.status, r.headers.get("Last-Modified")
+              except urllib.error.HTTPError as err:
+                  code = err.code
+                  if err.code == 404:
+                      print(f"HTTP 404 {url}, falling back")
+                      continue
+                  break
+              if code == 200 and lm:
+                  print(f"heartbeat source: {url}")
+                  break
           print(f"HTTP {code}, Last-Modified: {lm}")
           if code != 200 or not lm:
               sys.exit(f"heartbeat object not served (HTTP {code})")

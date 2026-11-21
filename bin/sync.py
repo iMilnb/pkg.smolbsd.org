@@ -822,6 +822,18 @@ def update_index_pages(s3):
     log(f"  directory pages: {len(tree)} dir(s), {updated} updated")
 
 
+def update_heartbeat(s3, mode):
+    """pub/heartbeat.txt: rewritten by EVERY successful sync.
+
+    Index pages are re-PUT only when their content changes, so a sync
+    that uploads nothing leaves them stale; the mirror-watch job must
+    read this object instead of a directory page.
+    """
+    now = datetime.datetime.now(datetime.timezone.utc)
+    s3.put("pub/heartbeat.txt",
+           f"{mode} sync ok {now.isoformat(timespec='seconds')}\n".encode())
+
+
 def sync_packages(arch, s3, manifest_dir, version, base, dry, cache_dir,
                   no_cache=False, cleanup=True):
     pkgarch = PKG_ARCH[arch]
@@ -1150,6 +1162,7 @@ def main():
     if not args.no_cleanup:
         prune_stale_versions(s3, args.mode, version, branch, args.dry_run)
     update_index_pages(s3)
+    update_heartbeat(s3, args.mode)
 
 
 if __name__ == "__main__":
