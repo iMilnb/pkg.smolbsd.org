@@ -124,11 +124,14 @@ jobs:
           rel=$(cat release)
           python3 bin/needs.py smolBSD-src --addpkgs addpkgs.txt > names.txt
           for arch in x86_64 aarch64 i386; do
+              # 'rc=0; ... || rc=$?' form is REQUIRED: steps run under
+              # 'bash -e', which would abort the step BEFORE the case below
+              # could tolerate exit 3 (unresolved seed names = known
+              # upstream smolBSD bugs or per-arch gaps like py314-uv on
+              # i386); anything else is fatal.
+              rc=0
               python3 bin/closure.py --list names.txt --arch "$arch" \
-                  --version "$rel" --out "manifest/needed-$arch.txt"
-              rc=$?
-              # exit 3 = unresolved seed names (known upstream smolBSD bugs,
-              # listed in README/plan) - tolerable; anything else is fatal.
+                  --version "$rel" --out "manifest/needed-$arch.txt" || rc=$?
               case "$rc" in 0|3) ;; *) exit "$rc" ;; esac
               test -s "manifest/needed-$arch.txt"
           done
