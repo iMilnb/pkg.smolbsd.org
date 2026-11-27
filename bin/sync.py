@@ -3,15 +3,15 @@
 sets from the NetBSD CDN into the pkg.smolbsd.org S3 bucket.
 
 Layout served (keys match cdn.netbsd.org paths):
-  pub/pkgsrc/packages/NetBSD/<x86_64|aarch64>/11.0/All/*.tgz
+  pub/pkgsrc/packages/NetBSD/<x86_64|aarch64|i386>/11.0/All/*.tgz
   pub/pkgsrc/packages/NetBSD/<arch>/11.0/All/pkg_summary.{gz,bz2}  (trimmed)
-  pub/NetBSD-daily/netbsd-11/latest/<amd64|evbarm-aarch64>/binary/sets/*
+  pub/NetBSD-daily/netbsd-11/latest/<amd64|evbarm-aarch64|i386>/binary/sets/*
 Every directory under pub/ gets a generated index.html (+ a slash-less
 redirect stub), so https://pkg.smolbsd.org/ browses like a NetBSD mirror.
 
 Modes:
-  sync.py packages --arch amd64|evbarm-aarch64|all --bucket B [--dry-run]
-  sync.py sets     --arch amd64|evbarm-aarch64|all --bucket B [--dry-run]
+  sync.py packages --arch amd64|evbarm-aarch64|i386|all --bucket B [--dry-run]
+  sync.py sets     --arch amd64|evbarm-aarch64|i386|all --bucket B [--dry-run]
 
 Mirror source (when cdn.netbsd.org times out): --source URL, env
 PKG_SMOLBSD_SOURCE, or a repo `source` file holding a NetBSD mirror root
@@ -63,7 +63,8 @@ SRC_TIMEOUT = 180  # source-side socket timeout: detects mid-transfer stalls
 PKG_SRC_BASE = "https://cdn.netbsd.org/pub/pkgsrc/packages/NetBSD"
 SETS_SRC_BASE = "https://nycdn.netbsd.org/pub/NetBSD-daily"
 PKG_ARCH = {"amd64": "x86_64", "x86_64": "x86_64",
-            "evbarm-aarch64": "aarch64", "aarch64": "aarch64"}
+            "evbarm-aarch64": "aarch64", "aarch64": "aarch64",
+            "i386": "i386"}
 CONTENT_TYPES = {
     ".tgz": "application/x-gzip",
     ".gz": "application/x-gzip",
@@ -1079,7 +1080,7 @@ def main():
     common.add_argument("--region",
                         default=os.environ.get("AWS_REGION", "eu-west-1"))
     common.add_argument("--arch", default="all",
-                        help="amd64|x86_64|evbarm-aarch64|aarch64|all")
+                        help="amd64|x86_64|evbarm-aarch64|aarch64|i386|all")
     common.add_argument("--source",
                         help="NetBSD mirror root for when cdn.netbsd.org "
                              "times out (env PKG_SMOLBSD_SOURCE or repo "
@@ -1139,8 +1140,8 @@ def main():
                              if source else SETS_SRC_BASE)
     log(f"source: {base}")
     if args.arch == "all":
-        arches = (["amd64", "evbarm-aarch64"] if args.mode == "sets"
-                  else ["x86_64", "aarch64"])
+        arches = (["amd64", "evbarm-aarch64", "i386"] if args.mode == "sets"
+                  else ["x86_64", "aarch64", "i386"])
     else:
         arches = [args.arch] if args.mode == "sets" else [PKG_ARCH[args.arch]]
 

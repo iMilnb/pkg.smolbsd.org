@@ -40,15 +40,17 @@
 # pkgsrc name per line, # comments). A push touching addpkgs.txt triggers
 # manifest-refresh immediately (besides Monday/manual): manifests regen with
 # the extras, the gate requires every addpkg in the x86_64 manifest
-# (aarch64-only gap = warning), and any drift is committed straight to
+# (aarch64/i386 gaps = warning), and any drift is committed straight to
 # main; live next
 # packages sync. Local regen (same as CI):
 #   python3 bin/needs.py ../smolBSD --addpkgs addpkgs.txt > names.txt
-#   python3 bin/closure.py --list names.txt --arch x86_64 --out manifest/needed-x86_64.txt
-#   python3 bin/closure.py --list names.txt --arch aarch64 --out manifest/needed-aarch64.txt
+#   for a in x86_64 aarch64 i386; do
+#       python3 bin/closure.py --list names.txt --arch "$a" --out manifest/needed-$a.txt
+#   done
 # After every manifest regeneration, audit it independently:
-#   python3 bin/verify_deps.py --manifest manifest/needed-x86_64.txt --arch x86_64
-#   python3 bin/verify_deps.py --manifest manifest/needed-aarch64.txt --arch aarch64
+#   for a in x86_64 aarch64 i386; do
+#       python3 bin/verify_deps.py --manifest manifest/needed-$a.txt --arch "$a"
+#   done
 # (exit 0 = every mirrored package's DEPENDS resolves inside the mirror)
 #
 # Release switch (e.g. 11.0 -> 11.1), when the time comes:

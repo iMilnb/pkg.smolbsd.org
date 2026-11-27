@@ -101,7 +101,7 @@ fi
     nomani=0
     if [ "$job" = packages ]; then
         mkdir -p "$mdir"
-        for a in x86_64 aarch64; do
+        for a in x86_64 aarch64 i386; do
             fetch_manifest "$a"
             case $? in
                 0) ;;

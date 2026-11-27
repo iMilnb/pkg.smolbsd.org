@@ -83,7 +83,7 @@ jobs:
         with: { python-version: '3.12' }
       - name: verify committed manifests (audit gate)
         run: |
-          for arch in x86_64 aarch64; do
+          for arch in x86_64 aarch64 i386; do
               python3 bin/verify_deps.py --manifest "manifest/needed-$arch.txt" --arch "$arch"
           done
 
@@ -123,7 +123,7 @@ jobs:
         run: |
           rel=$(cat release)
           python3 bin/needs.py smolBSD-src --addpkgs addpkgs.txt > names.txt
-          for arch in x86_64 aarch64; do
+          for arch in x86_64 aarch64 i386; do
               python3 bin/closure.py --list names.txt --arch "$arch" \
                   --version "$rel" --out "manifest/needed-$arch.txt"
               rc=$?
@@ -138,7 +138,8 @@ jobs:
           # every package explicitly requested in addpkgs.txt must land in
           # the x86_64 manifest - a typo or retired name stops the run here
           # instead of being silently dropped by closure.py's exit 3
-          # tolerance; a missing aarch64 build only warns (arch-specific
+          # tolerance; a missing aarch64 or i386 build only warns
+          # (arch-specific
           # packages exist upstream)
           grep -v '^#' addpkgs.txt | awk 'NF {print $1}' > addpkgs.names \
               || true
@@ -158,10 +159,16 @@ jobs:
                   manifest/needed-aarch64.txt \
                   || echo "::warning::addpkg $n has no aarch64 build - not mirrored"
           done < addpkgs.names
+          while read -r n; do
+              [ -n "$n" ] || continue
+              awk -F'\t' -v n="$n" 'index($1, n "-") == 1 { found=1 } END { exit !found }' \
+                  manifest/needed-i386.txt \
+                  || echo "::warning::addpkg $n has no i386 build - not mirrored"
+          done < addpkgs.names
       - name: verify_deps gate
         if: env.PROCEED == 'true'
         run: |
-          for arch in x86_64 aarch64; do
+          for arch in x86_64 aarch64 i386; do
               python3 bin/verify_deps.py --manifest "manifest/needed-$arch.txt" --arch "$arch"
           done
       - name: commit drift straight to main

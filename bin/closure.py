@@ -124,7 +124,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--list", help="file of package names (default: stdin)")
     ap.add_argument("--arch", required=True,
-                    help="amd64|x86_64|evbarm-aarch64|aarch64")
+                    help="amd64|x86_64|evbarm-aarch64|aarch64|i386")
     ap.add_argument("--version",
                     help="pkgsrc OS version (default: release file / env)")
     ap.add_argument("--base", default=BASE, help="repository base URL")
